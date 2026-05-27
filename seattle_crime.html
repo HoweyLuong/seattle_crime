@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seattle Crime Map</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.9.0/d3.min.js"></script>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="loading">
+  <h2>SEATTLE CRIME</h2>
+  <div class="loading-bar"><div class="loading-fill"></div></div>
+  <p id="load-status" style="font-size:11px;color:var(--text-dim);margin-top:10px;">Loading data…</p>
+</div>
+
+<div id="app" style="display:none">
+  <div id="header">
+    <div>
+      <div class="subtitle">Seattle Police Department</div>
+      <h1>CRIME DATA</h1>
+    </div>
+    <div class="subtitle">2008–2026 · 1.5M+ INCIDENTS</div>
+    <div class="stats-bar">
+      <div class="stat"><div class="stat-val" id="stat-showing">—</div><div class="stat-lbl">Showing</div></div>
+      <div class="stat"><div class="stat-val" id="stat-nbhd">61</div><div class="stat-lbl">Neighborhoods</div></div>
+      <div class="stat"><div class="stat-val" id="stat-range">—</div><div class="stat-lbl">Date Range</div></div>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div class="panel">
+      <div class="panel-title">Filters</div>
+
+      <div class="filter-group">
+        <label class="filter-label">Crime Category</label>
+        <select id="cat-filter">
+          <option value="">All Categories</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label class="filter-label">Crime Type</label>
+        <select id="sub-filter">
+          <option value="">All Types</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label class="filter-label">Year Range</label>
+        <div class="range-wrap">
+          <input type="range" id="year-min" min="2008" max="2026" value="2008" step="1">
+          <span class="range-val" id="year-min-val">2008</span>
+        </div>
+        <div class="range-wrap" style="margin-top:4px">
+          <input type="range" id="year-max" min="2008" max="2026" value="2026" step="1">
+          <span class="range-val" id="year-max-val">2026</span>
+        </div>
+      </div>
+
+      <div class="filter-group">
+        <label class="filter-label">Top Crimes to Show</label>
+        <div class="topn-btns">
+          <button class="topn-btn active" data-n="5">Top 5</button>
+          <button class="topn-btn" data-n="10">Top 10</button>
+          <button class="topn-btn" data-n="20">Top 20</button>
+        </div>
+      </div>
+
+      <button class="reset-btn" id="reset-btn">↺ Reset All Filters</button>
+    </div>
+
+    <div class="panel" style="padding-bottom:4px">
+      <div class="panel-title">Neighborhoods — click to explore</div>
+    </div>
+    <div id="neighborhood-list"></div>
+  </div>
+
+  <div id="map-container">
+    <div id="leaflet-map"></div>
+
+    <div id="zoom-controls">
+      <button class="zoom-btn" id="zoom-in">+</button>
+      <button class="zoom-btn" id="zoom-reset">⊙</button>
+      <button class="zoom-btn" id="zoom-out">−</button>
+    </div>
+
+    <div id="legend">
+      <div class="legend-title">Crime Category</div>
+      <div id="legend-items"></div>
+    </div>
+
+    <div id="tooltip"></div>
+
+    <div id="charts-panel">
+
+      <!-- Header row -->
+      <div id="charts-header">
+        <div id="charts-title">NEIGHBORHOOD</div>
+        <button id="charts-close">✕</button>
+      </div>
+
+      <!-- Primary Risk card (always visible) -->
+      <div id="primary-risk">
+        <div class="risk-label">Primary Risk</div>
+        <div id="risk-crime">—</div>
+        <div class="risk-meta">
+          <span id="risk-cat-badge" class="risk-cat-badge">—</span>
+          <span class="risk-stat"><b id="risk-count">—</b> cases</span>
+          <span class="risk-stat"><b id="risk-pct">—</b>% of total</span>
+        </div>
+      </div>
+
+      <!-- Tab navigation -->
+      <div id="chart-tabs">
+        <button class="chart-tab active" data-tab="top">Top Crimes</button>
+        <button class="chart-tab"        data-tab="trend">Over Time</button>
+      </div>
+
+      <!-- Tab panels -->
+      <div id="charts-body">
+        <div id="tab-top" class="tab-pane active">
+          <svg id="bar-chart"></svg>
+        </div>
+        <div id="tab-trend" class="tab-pane">
+          <div id="trend-legend" class="trend-legend"></div>
+          <svg id="trend-chart"></svg>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+
+// ── Color palettes ────────────────────────────────────────────────────────
+const CAT_COLORS = {
+  'VIOLENT CRIME':  '#ff4d4d',
+  'PROPERTY CRIME': '#ffa040',
+  'ALL OTHER':      '#40b4ff'
+};
+
+const SUB_COLORS = [
+  '#ff4d4d','#ff7b2e','#ffa040','#ffe040','#a0ff60',
+  '#3dffa0','#40e8ff','#40b4ff','#7090ff','#b06cff',
+  '#ff50c0','#ff3370','#ff6644','#c8ff40','#40ffcc',
+  '#50aaff','#aa60ff','#ff80aa','#80ff80','#ffcc44',
+  '#ff5566','#44ffaa','#88ccff','#ffaa66','#ccff66',
+  '#ff44cc','#44ccff','#ffee44','#66ff88','#ee66ff',
+  '#ff8844'
+];
+
+// ── State ─────────────────────────────────────────────────────────────────
+let crimeData = null;
+let statsData  = null;
+let state = {
+  selectedNeighborhood: null,
+  catFilter: '',
+  subFilter: '',
+  yearMin: 2008,
+  yearMax: 2026,
+  topN: 5
+};
+
+// ── Load CSV ──────────────────────────────────────────────────────────────
+fetch('./seattle_crime.csv')
+  .then(res => {
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return res.text();
+  })
+  .then(csvText => {
+    document.getElementById('load-status').textContent = 'Parsing…';
+    parseCSVText(csvText);
+  })
+  .catch(err => {
+    document.getElementById('load-status').textContent = 'Error: ' + err.message;
+  });
+
+function parseCSVText(csvText) {
+  const points          = [];
+  const neighborhoodSet = new Set();
+  const categorySet     = new Set();
+  const subcategorySet  = new Set();
+  const nibrsSet        = new Set();
+
+  Papa.parse(csvText, {
+    header: true,
+    skipEmptyLines: true,
+    step: (row) => {
+      const d   = row.data;
+      const lat = parseFloat(d['Latitude']);
+      const lon = parseFloat(d['Longitude']);
+      if (!lat || !lon || lat < 47.4 || lat > 47.8 || lon < -122.55 || lon > -122.1) return;
+      neighborhoodSet.add(d['Neighborhood']);
+      categorySet.add(d['Offense Category']);
+      subcategorySet.add(d['Offense Sub Category']);
+      nibrsSet.add(d['NIBRS Offense Code Description']);
+      points.push(d);
+    },
+    complete: () => {
+      document.getElementById('load-status').textContent =
+        `Processing ${points.length.toLocaleString()} records…`;
+      buildCrimeData(points, neighborhoodSet, categorySet, subcategorySet, nibrsSet);
+    }
+  });
+}
+
+function buildCrimeData(rows, neighborhoodSet, categorySet, subcategorySet, nibrsSet) {
+  const neighborhoods = [...neighborhoodSet].sort();
+  const categories    = [...categorySet].sort();
+  const subcategories = [...subcategorySet].sort();
+  const nibrs         = [...nibrsSet].sort();
+
+  const nIdx  = Object.fromEntries(neighborhoods.map((n,i) => [n,i]));
+  const cIdx  = Object.fromEntries(categories.map((c,i)   => [c,i]));
+  const sIdx  = Object.fromEntries(subcategories.map((s,i) => [s,i]));
+  const niIdx = Object.fromEntries(nibrs.map((n,i)        => [n,i]));
+
+  const compact = rows.map(d => {
+    const parts    = (d['Offense Date'] || '').split(' ');
+    const year     = parseInt(parts[0]) || 0;
+    const monthMap = {Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+    const month    = monthMap[parts[1]] || 0;
+    return [
+      parseFloat(d['Latitude']),
+      parseFloat(d['Longitude']),
+      nIdx[d['Neighborhood']]                         ?? -1,
+      cIdx[d['Offense Category']]                     ?? -1,
+      sIdx[d['Offense Sub Category']]                 ?? -1,
+      niIdx[d['NIBRS Offense Code Description']]      ?? -1,
+      year, month,
+      d['Block Address']
+    ];
+  });
+
+  crimeData = { neighborhoods, categories, subcategories, nibrs, points: compact };
+  statsData = buildStats(rows, neighborhoods);
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('app').style.display = 'grid';
+  setupFilters();
+  setupMap();
+  setupControls();
+  renderNeighborhoodList();
+  updateStats();
+}
+
+// ── Neighborhood list ─────────────────────────────────────────────────────
+// Counts use the same cat / sub / year filters as getFilteredPoints()
+// (neighbourhood filter excluded) so the sidebar number always matches
+// the "Showing" stat when you click that neighbourhood.
+function renderNeighborhoodList() {
+  const container = document.getElementById('neighborhood-list');
+  const activeNbhd = state.selectedNeighborhood;
+
+  const { neighborhoods, points, categories, subcategories } = crimeData;
+  const { catFilter, subFilter, yearMin, yearMax } = state;
+  const catIdx = catFilter ? categories.indexOf(catFilter)    : -1;
+  const subIdx = subFilter ? subcategories.indexOf(subFilter) : -1;
+
+  const counts = {};
+  points.forEach(p => {
+    if (catIdx >= 0 && p[3] !== catIdx)       return;
+    if (subIdx >= 0 && p[4] !== subIdx)       return;
+    if (p[6] < yearMin || p[6] > yearMax)     return;
+    const n = neighborhoods[p[2]];
+    if (n && n !== '-') counts[n] = (counts[n] || 0) + 1;
+  });
+
+  container.innerHTML = '';
+  Object.entries(counts).sort((a,b) => b[1]-a[1]).forEach(([name, count]) => {
+    const el = document.createElement('div');
+    el.className    = 'nbhd-item' + (name === activeNbhd ? ' active' : '');
+    el.dataset.name = name;
+    el.innerHTML = `<span class="nbhd-name">${name}</span><span class="nbhd-count">${count.toLocaleString()}</span>`;
+    el.addEventListener('click', () => selectNeighborhood(name));
+    container.appendChild(el);
+  });
+}
+
+// ── Stats builder ─────────────────────────────────────────────────────────
+function buildStats(rows, neighborhoods) {
+  const crimeCounts = {};
+  const yearCounts  = {};
+
+  rows.forEach(d => {
+    const n = d['Neighborhood'];
+    if (!n || n === '-') return;
+    const sub  = d['Offense Sub Category'];
+    const year = parseInt((d['Offense Date'] || '').split(' ')[0]);
+    if (!year || year < 2005 || year > 2026) return;
+
+    if (!crimeCounts[n]) crimeCounts[n] = {};
+    crimeCounts[n][sub] = (crimeCounts[n][sub] || 0) + 1;
+
+    if (!yearCounts[n]) yearCounts[n] = {};
+    yearCounts[n][year] = (yearCounts[n][year] || 0) + 1;
+  });
+
+  const crimes = {};
+  const yearly = {};
+  neighborhoods.forEach(n => {
+    if (crimeCounts[n]) crimes[n] = Object.entries(crimeCounts[n]).sort((a,b) => b[1]-a[1]).slice(0,20);
+    if (yearCounts[n])  yearly[n] = Object.entries(yearCounts[n]).map(([y,c]) => [+y,c]).sort((a,b) => a[0]-b[0]);
+  });
+  return { crimes, yearly };
+}
+
+// ── Filters ───────────────────────────────────────────────────────────────
+function setupFilters() {
+  const catSel = document.getElementById('cat-filter');
+  crimeData.categories.forEach(c => {
+    const o = document.createElement('option');
+    o.value = c; o.textContent = c;
+    catSel.appendChild(o);
+  });
+
+  const subSel = document.getElementById('sub-filter');
+  crimeData.subcategories.forEach(s => {
+    if (s === '999') return;
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    subSel.appendChild(o);
+  });
+
+  catSel.addEventListener('change', () => { state.catFilter = catSel.value; applyFilters(); });
+  subSel.addEventListener('change', () => { state.subFilter = subSel.value; applyFilters(); });
+
+  const yMin    = document.getElementById('year-min');
+  const yMax    = document.getElementById('year-max');
+  const yMinVal = document.getElementById('year-min-val');
+  const yMaxVal = document.getElementById('year-max-val');
+
+  yMin.addEventListener('input', () => {
+    state.yearMin = +yMin.value;
+    if (state.yearMin > state.yearMax) { state.yearMax = state.yearMin; yMax.value = state.yearMax; }
+    yMinVal.textContent = state.yearMin; yMaxVal.textContent = state.yearMax;
+    applyFilters();
+  });
+  yMax.addEventListener('input', () => {
+    state.yearMax = +yMax.value;
+    if (state.yearMax < state.yearMin) { state.yearMin = state.yearMax; yMin.value = state.yearMin; }
+    yMaxVal.textContent = state.yearMax; yMinVal.textContent = state.yearMin;
+    applyFilters();
+  });
+
+  document.querySelectorAll('.topn-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.topn-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.topN = +btn.dataset.n;
+      if (state.selectedNeighborhood) renderCharts(state.selectedNeighborhood);
+    });
+  });
+
+  document.getElementById('reset-btn').addEventListener('click', resetFilters);
+}
+
+function resetFilters() {
+  state.catFilter = ''; state.subFilter = '';
+  state.yearMin = 2008; state.yearMax = 2026;
+  document.getElementById('cat-filter').value   = '';
+  document.getElementById('sub-filter').value   = '';
+  document.getElementById('year-min').value      = 2008;
+  document.getElementById('year-max').value      = 2026;
+  document.getElementById('year-min-val').textContent = 2008;
+  document.getElementById('year-max-val').textContent = 2026;
+  applyFilters();
+}
+
+let _filteredCache = null;
+function getFilteredPoints() {
+  if (_filteredCache) return _filteredCache;
+  const { catFilter, subFilter, yearMin, yearMax, selectedNeighborhood } = state;
+  const { points, neighborhoods, categories, subcategories } = crimeData;
+  const catIdx  = catFilter          ? categories.indexOf(catFilter)        : -1;
+  const subIdx  = subFilter          ? subcategories.indexOf(subFilter)     : -1;
+  const nbhdIdx = selectedNeighborhood ? neighborhoods.indexOf(selectedNeighborhood) : -1;
+
+  _filteredCache = points.filter(p => {
+    if (catIdx  >= 0 && p[3] !== catIdx)  return false;
+    if (subIdx  >= 0 && p[4] !== subIdx)  return false;
+    if (p[6] < yearMin || p[6] > yearMax) return false;
+    if (nbhdIdx >= 0 && p[2] !== nbhdIdx) return false;
+    return true;
+  });
+  return _filteredCache;
+}
+
+function applyFilters() {
+  _filteredCache = null;
+  renderDots();
+  renderNeighborhoodList();                                      // keep sidebar counts in sync
+  if (state.selectedNeighborhood) renderCharts(state.selectedNeighborhood);
+}
+
+function updateStats() {
+  const pts = getFilteredPoints();
+  document.getElementById('stat-showing').textContent = pts.length.toLocaleString();
+  document.getElementById('stat-range').textContent   =
+    state.yearMin === state.yearMax ? state.yearMin : `${state.yearMin}–${state.yearMax}`;
+}
+
+// ── Map ───────────────────────────────────────────────────────────────────
+let leafletMap;
+let canvas, ctx;
+let _nbhdHulls = [];   // [{name, latLons: [[lat,lon]…]}]  — canvas click detection
+
+function setupMap() {
+  leafletMap = L.map('leaflet-map', { zoomControl: false }).setView([47.608, -122.335], 12);
+
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '© OpenStreetMap © CARTO', maxZoom: 19
+  }).addTo(leafletMap);
+
+  const mapContainer = leafletMap.getContainer();
+
+  // ── Canvas for crime dots (z-index 400) ────────────────────────────────
+  canvas = document.createElement('canvas');
+  canvas.style.cssText = 'position:absolute;top:0;left:0;pointer-events:auto;z-index:400;cursor:grab;';
+  mapContainer.appendChild(canvas);
+  ctx = canvas.getContext('2d');
+
+  // ── Tooltip ───────────────────────────────────────────────────────────
+  let tooltipThrottle;
+  canvas.addEventListener('mousemove', (e) => {
+    if (tooltipThrottle) return;
+    tooltipThrottle = setTimeout(() => { tooltipThrottle = null; }, 30);
+
+    const rect = canvas.getBoundingClientRect();
+    const mx   = e.clientX - rect.left;
+    const my   = e.clientY - rect.top;
+
+    let closest = null, closestDist = 12;
+    for (const pt of _drawnPoints) {
+      const dx = pt.x - mx, dy = pt.y - my;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      if (dist < closestDist) { closestDist = dist; closest = pt.d; }
+    }
+
+    if (closest) {
+      showTooltip(e, closest);
+      leafletMap.dragging.disable();
+      canvas.style.cursor = 'pointer';
+    } else {
+      hideTooltip();
+      leafletMap.dragging.enable();
+      canvas.style.cursor = 'grab';
+    }
+  });
+
+  canvas.addEventListener('mousedown', (e) => {
+    if (!leafletMap.dragging._enabled) e.stopPropagation();
+  });
+  canvas.addEventListener('mouseleave', () => {
+    hideTooltip();
+    leafletMap.dragging.enable();
+    canvas.style.cursor = 'grab';
+  });
+
+  // Click on empty map area → find which neighbourhood hull contains the click
+  // and select it (dots near cursor are handled by tooltip, not this handler).
+  canvas.addEventListener('click', (e) => {
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+
+    // Ignore clicks that land on or very close to an existing dot
+    for (const pt of _drawnPoints) {
+      const dx = pt.x - mx, dy = pt.y - my;
+      if (dx*dx + dy*dy < 64) return;   // within 8px of a dot
+    }
+
+    // Test each hull with a ray-cast (d3.polygonContains)
+    for (const { name, latLons } of _nbhdHulls) {
+      const projPts = latLons.map(([lat, lon]) => {
+        const p = leafletMap.latLngToContainerPoint([lat, lon]);
+        return [p.x, p.y];
+      });
+      if (d3.polygonContains(projPts, [mx, my])) {
+        selectNeighborhood(name);
+        return;
+      }
+    }
+  });
+
+  // ── Re-render on zoom / pan ───────────────────────────────────────────
+  // Our canvas is outside Leaflet's CSS-animated tile hierarchy, so it can't
+  // follow the CSS scale during a zoom animation.
+  // Fix: wipe the canvas the instant zoom starts (no drifting dots), then
+  // do a full accurate redraw once the animation is done.
+  // For panning we stay RAF-throttled on every 'move' frame — dots track
+  // the tiles smoothly without disappearing.
+
+  leafletMap.on('zoomstart', () => {
+    // Wipe canvas on zoom-start so dots don't drift during the CSS zoom animation.
+    // The GeoJSON layer is Leaflet-managed and repositions itself automatically.
+    if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
+    _drawnPoints = [];
+  });
+
+  let _rafId = null;
+  function scheduleRenderDots() {
+    if (_rafId) cancelAnimationFrame(_rafId);
+    _rafId = requestAnimationFrame(() => { _rafId = null; renderDots(); });
+  }
+  leafletMap.on('move zoomend moveend', scheduleRenderDots);
+
+  setupLegend();
+  buildNeighborhoodHulls();   // convex hulls for canvas click-to-select detection
+  renderDots();
+}
+
+// ── Neighbourhood hull helpers (canvas click-to-select detection) ─────────
+
+function buildNeighborhoodHulls() {
+  const { points, neighborhoods } = crimeData;
+  const buckets = {};
+  neighborhoods.forEach((n, i) => { if (n && n !== '-') buckets[i] = []; });
+  points.forEach(p => { if (p[2] in buckets) buckets[p[2]].push([p[1], p[0]]); }); // [lon,lat] for d3
+
+  _nbhdHulls = [];
+  neighborhoods.forEach((name, i) => {
+    if (!name || name === '-' || !buckets[i] || buckets[i].length < 10) return;
+    const hull = d3.polygonHull(buckets[i]);
+    if (!hull) return;
+    _nbhdHulls.push({ name, latLons: hull.map(([lon, lat]) => [lat, lon]) }); // store [lat,lon]
+  });
+}
+
+
+// ── Legend ────────────────────────────────────────────────────────────────
+function setupLegend() {
+  const container = document.getElementById('legend-items');
+  crimeData.categories.forEach(c => {
+    const item = document.createElement('div');
+    item.className = 'legend-item';
+    item.innerHTML = `<div class="legend-dot" style="background:${CAT_COLORS[c] || '#aaa'}"></div><span>${c}</span>`;
+    container.appendChild(item);
+  });
+}
+
+// ── Canvas dot rendering ──────────────────────────────────────────────────
+let _drawnPoints = [];
+
+function renderDots() {
+  if (!canvas || !ctx) return;
+
+  const size = leafletMap.getSize();
+  canvas.width  = size.x;
+  canvas.height = size.y;
+  ctx.clearRect(0, 0, size.x, size.y);
+
+  const pts      = getFilteredPoints();
+  const { categories } = crimeData;
+  const zoom     = leafletMap.getZoom();
+  const maxDots  = zoom < 12 ? 15000 : zoom < 14 ? 50000 : pts.length;
+  const step     = pts.length > maxDots ? Math.ceil(pts.length / maxDots) : 1;
+
+  // Sample
+  const sampled = [];
+  for (let i = 0; i < pts.length; i += step) sampled.push(pts[i]);
+
+  // Batch by color
+  const byColor = {};
+  for (const d of sampled) {
+    const color = CAT_COLORS[categories[d[3]]] || '#aaaaaa';
+    if (!byColor[color]) byColor[color] = [];
+    byColor[color].push(d);
+  }
+
+  _drawnPoints = [];
+  ctx.globalAlpha = 0.35;
+  const dotR = zoom < 13 ? 1.5 : 2;
+
+  for (const [color, group] of Object.entries(byColor)) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (const d of group) {
+      const p = leafletMap.latLngToContainerPoint([d[0], d[1]]);
+      if (p.x < -10 || p.y < -10 || p.x > size.x + 10 || p.y > size.y + 10) continue;
+      ctx.moveTo(p.x + dotR, p.y);
+      ctx.arc(p.x, p.y, dotR, 0, Math.PI * 2);
+      _drawnPoints.push({ d, x: p.x, y: p.y });
+    }
+    ctx.fill();
+  }
+
+  updateStats();
+}
+
+// ── Tooltip ───────────────────────────────────────────────────────────────
+function showTooltip(event, d) {
+  const { categories, subcategories, nibrs, neighborhoods } = crimeData;
+  const cat   = categories[d[3]]    || 'Unknown';
+  const sub   = subcategories[d[4]] || 'Unknown';
+  const nibrsDesc = nibrs[d[5]]     || '—';
+  const nbhd  = neighborhoods[d[2]] || '—';
+  const color = CAT_COLORS[cat]     || '#aaa';
+
+  const tt = document.getElementById('tooltip');
+  tt.innerHTML = `
+    <div class="tt-type" style="color:${color}">${cat}</div>
+    <div class="tt-sub">${sub}</div>
+    <div class="tt-row"><span class="tt-key">NIBRS</span><span class="tt-val">${nibrsDesc.substring(0,30)}</span></div>
+    <div class="tt-row"><span class="tt-key">Neighborhood</span><span class="tt-val">${nbhd}</span></div>
+    <div class="tt-row"><span class="tt-key">Location</span><span class="tt-val">${d[8] ? d[8].substring(0,25) : '—'}</span></div>
+    <div class="tt-row"><span class="tt-key">Year</span><span class="tt-val">${d[6] || '—'}</span></div>
+  `;
+  tt.classList.add('visible');
+  moveTooltip(event);
+}
+
+function moveTooltip(event) {
+  const tt        = document.getElementById('tooltip');
+  const container = document.getElementById('map-container');
+  const rect      = container.getBoundingClientRect();
+  let x = event.clientX - rect.left + 14;
+  let y = event.clientY - rect.top  - 10;
+  if (x + 230 > rect.width)  x = event.clientX - rect.left - 230;
+  if (y + 160 > rect.height) y = event.clientY - rect.top  - 160;
+  tt.style.left = x + 'px';
+  tt.style.top  = y + 'px';
+}
+
+function hideTooltip() {
+  document.getElementById('tooltip').classList.remove('visible');
+}
+
+// ── Neighbourhood selection ───────────────────────────────────────────────
+function selectNeighborhood(name) {
+  state.selectedNeighborhood = name;
+
+  // Highlight active item in sidebar list
+  document.querySelectorAll('.nbhd-item').forEach(el =>
+    el.classList.toggle('active', el.dataset.name === name));
+
+
+  // Open charts panel
+  document.getElementById('charts-title').textContent =
+    name.length > 18 ? name.substring(0,17)+'…' : name;
+  document.getElementById('charts-panel').classList.add('open');
+
+  // Fly the map to show this neighborhood's dots (extra right padding for the panel)
+  zoomToNeighborhood(name);
+
+  renderCharts(name);
+  applyFilters();
+}
+
+// Zoom map to fit the selected neighborhood's crime dots.
+// Uses a fast single-pass min/max scan (no spread operator — avoids stack overflow
+// on large arrays). Extra right padding accounts for the 300 px charts panel.
+function zoomToNeighborhood(name) {
+  const { points, neighborhoods } = crimeData;
+  const nbhdIdx = neighborhoods.indexOf(name);
+  if (nbhdIdx < 0) return;
+
+  let minLat =  Infinity, maxLat = -Infinity;
+  let minLon =  Infinity, maxLon = -Infinity;
+  let found  = false;
+
+  for (const p of points) {
+    if (p[2] !== nbhdIdx) continue;
+    if (p[0] < minLat) minLat = p[0];
+    if (p[0] > maxLat) maxLat = p[0];
+    if (p[1] < minLon) minLon = p[1];
+    if (p[1] > maxLon) maxLon = p[1];
+    found = true;
+  }
+  if (!found) return;
+
+  leafletMap.flyToBounds(
+    L.latLngBounds([minLat, minLon], [maxLat, maxLon]),
+    { paddingTopLeft: [30, 30], paddingBottomRight: [320, 30], duration: 0.8 }
+  );
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function renderCharts(neighborhood) {
+  renderPrimaryRisk(neighborhood);
+  renderBarChart(neighborhood);
+  renderTrendChart(neighborhood);
+}
+
+// ── Primary Risk card ─────────────────────────────────────────────────────
+function renderPrimaryRisk(neighborhood) {
+  // Use currently filtered points so it reflects year / category filters
+  const pts = getFilteredPoints();
+  const { subcategories, categories } = crimeData;
+
+  // Tally subcategory counts and track which category each belongs to
+  const subCounts = {};
+  const subToCategory = {};
+  pts.forEach(p => {
+    const sub = subcategories[p[4]];
+    const cat = categories[p[3]];
+    if (!sub || sub === '999') return;
+    subCounts[sub] = (subCounts[sub] || 0) + 1;
+    subToCategory[sub] = cat;
+  });
+
+  const sorted = Object.entries(subCounts).sort((a,b) => b[1]-a[1]);
+  if (sorted.length === 0) {
+    document.getElementById('risk-crime').textContent   = 'No data';
+    document.getElementById('risk-cat-badge').textContent = '—';
+    document.getElementById('risk-count').textContent   = '—';
+    document.getElementById('risk-pct').textContent     = '—';
+    return;
+  }
+
+  const [topCrime, topCount] = sorted[0];
+  const total   = pts.length;
+  const pct     = total > 0 ? ((topCount / total) * 100).toFixed(1) : '0';
+  const cat     = subToCategory[topCrime] || 'ALL OTHER';
+  const catColor = CAT_COLORS[cat] || '#aaa';
+
+  document.getElementById('risk-crime').textContent = topCrime;
+  const badge = document.getElementById('risk-cat-badge');
+  badge.textContent  = cat;
+  badge.style.color  = catColor;
+  document.getElementById('risk-count').textContent = topCount.toLocaleString();
+  document.getElementById('risk-pct').textContent   = pct;
+}
+
+function renderBarChart(neighborhood) {
+  const topCrimes = statsData.crimes[neighborhood] || [];
+  const topN      = topCrimes.slice(0, state.topN);
+  // Fit inside 300px panel (12px side padding each = 276px usable)
+  const W = 268, H = 24 + topN.length * 28;
+  const margin    = { top: 6, right: 36, bottom: 6, left: 116 };
+  const innerW    = W - margin.left - margin.right;   // 116
+  const innerH    = H - margin.top  - margin.bottom;
+
+  const svg = d3.select('#bar-chart').attr('width', W).attr('height', H);
+  svg.selectAll('*').remove();
+  const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`);
+
+  const maxVal = d3.max(topN, d => d[1]) || 1;
+  const xScale = d3.scaleLinear().domain([0, maxVal]).range([0, innerW]);
+  const yScale = d3.scaleBand().domain(topN.map(d => d[0])).range([0, innerH]).padding(0.22);
+
+  g.selectAll('.bar').data(topN).join('rect')
+    .attr('class',  'bar-chart-bar')
+    .attr('x', 0)
+    .attr('y',      d => yScale(d[0]))
+    .attr('height', yScale.bandwidth())
+    .attr('width',  d => xScale(d[1]))
+    .attr('fill',  (d,i) => SUB_COLORS[i % SUB_COLORS.length])
+    .attr('opacity', 0.85)
+    .attr('rx', 2);
+
+  g.selectAll('.bar-val').data(topN).join('text')
+    .attr('x', d => xScale(d[1]) + 3)
+    .attr('y', d => yScale(d[0]) + yScale.bandwidth()/2 + 3.5)
+    .attr('fill', 'var(--text-dim)').attr('font-size', 8).attr('font-family', 'DM Mono')
+    .text(d => d[1].toLocaleString());
+
+  g.selectAll('.bar-label').data(topN).join('text')
+    .attr('class', 'bar-label')
+    .attr('x', -4)
+    .attr('y', d => yScale(d[0]) + yScale.bandwidth()/2 + 3.5)
+    .attr('text-anchor', 'end')
+    .attr('font-size', 9)
+    .text(d => d[0].length > 16 ? d[0].substring(0,15)+'…' : d[0]);
+}
+
+// ── Over Time: multi-line chart by crime category ─────────────────────────
+function renderTrendChart(neighborhood) {
+  // Fit inside the 300 px panel (12 px padding each side = 276 px usable)
+  const W = 268, H = 195;
+  const margin = { top: 14, right: 8, bottom: 30, left: 44 };
+  const innerW = W - margin.left - margin.right;   // 216
+  const innerH = H - margin.top  - margin.bottom;  // 151
+
+  const { points, neighborhoods, categories } = crimeData;
+  const nbhdIdx = neighborhoods.indexOf(neighborhood);
+
+  // Build year x category counts directly from raw points
+  // (avoids stale getFilteredPoints cache, always correct for current nbhd)
+  const yearCatMap = {};
+  for (const p of points) {
+    if (p[2] !== nbhdIdx) continue;
+    if (!p[6] || p[6] < state.yearMin || p[6] > state.yearMax) continue;
+    const cat = categories[p[3]] || 'ALL OTHER';
+    if (!yearCatMap[p[6]]) yearCatMap[p[6]] = {};
+    yearCatMap[p[6]][cat] = (yearCatMap[p[6]][cat] || 0) + 1;
+  }
+
+  const years = Object.keys(yearCatMap).map(Number).sort((a, b) => a - b);
+
+  // Use actual categories found in the data (not hardcoded CAT_COLORS keys)
+  // so the chart always shows real data even if key names differ slightly.
+  const catsFound = new Set();
+  Object.values(yearCatMap).forEach(cm => Object.keys(cm).forEach(c => catsFound.add(c)));
+  const catNames = [...catsFound].sort();
+
+  const series = catNames.map(cat => ({
+    cat,
+    color: CAT_COLORS[cat] || '#aaaaaa',
+    data:  years.map(y => ({ year: y, count: (yearCatMap[y] && yearCatMap[y][cat]) || 0 }))
+  }));
+
+  // Legend
+  const legendEl = document.getElementById('trend-legend');
+  legendEl.innerHTML = '';
+  series.forEach(({ cat, color }) => {
+    const item = document.createElement('div');
+    item.className = 'trend-legend-item';
+    item.innerHTML = '<div class="trend-legend-swatch" style="background:' + color + '"></div>' + cat;
+    legendEl.appendChild(item);
+  });
+
+  // SVG
+  const svg = d3.select('#trend-chart').attr('width', W).attr('height', H);
+  svg.selectAll('*').remove();
+
+  if (years.length === 0) {
+    svg.append('text').attr('fill', 'var(--text-dim)')
+      .attr('x', W / 2).attr('y', H / 2)
+      .attr('text-anchor', 'middle').attr('font-size', 10).attr('font-family', 'DM Mono')
+      .text('No data for selected range');
+    return;
+  }
+
+  const g = svg.append('g').attr('transform', 'translate(' + margin.left + ',' + margin.top + ')');
+
+  const xScale = d3.scaleLinear().domain([years[0], years[years.length - 1]]).range([0, innerW]);
+  const maxY   = d3.max(series.flatMap(s => s.data.map(d => d.count))) || 1;
+  const yScale = d3.scaleLinear().domain([0, maxY]).nice().range([innerH, 0]);
+
+  // No .defined() guard — lines always draw so chart is never blank
+  const lineGen = d3.line()
+    .x(d => xScale(d.year)).y(d => yScale(d.count))
+    .curve(d3.curveMonotoneX);
+
+  const areaGen = d3.area()
+    .x(d => xScale(d.year)).y0(innerH).y1(d => yScale(d.count))
+    .curve(d3.curveMonotoneX);
+
+  // Area fills (subtle)
+  series.forEach(({ color, data }) => {
+    g.append('path').datum(data)
+      .attr('fill', hexToRgba(color, 0.07)).attr('d', areaGen);
+  });
+
+  // Lines
+  series.forEach(({ color, data }) => {
+    g.append('path').datum(data)
+      .attr('fill', 'none').attr('stroke', color)
+      .attr('stroke-width', 1.8).attr('d', lineGen);
+  });
+
+  // Dots (only for years with data > 0)
+  series.forEach(({ color, data }) => {
+    g.selectAll(null).data(data.filter(d => d.count > 0)).join('circle')
+      .attr('r', 2.5)
+      .attr('cx', d => xScale(d.year)).attr('cy', d => yScale(d.count))
+      .attr('fill', color);
+  });
+
+  // Axes
+  g.append('g').attr('class', 'axis').attr('transform', 'translate(0,' + innerH + ')')
+    .call(d3.axisBottom(xScale).ticks(Math.min(years.length, 6)).tickFormat(d3.format('d')));
+  g.append('g').attr('class', 'axis')
+    .call(d3.axisLeft(yScale).ticks(4)
+      .tickFormat(d => d >= 1000 ? (d / 1000).toFixed(1) + 'k' : d));
+}
+
+// ── Controls ──────────────────────────────────────────────────────────────
+function setupControls() {
+  document.getElementById('zoom-in').addEventListener('click',  () => leafletMap.zoomIn());
+  document.getElementById('zoom-out').addEventListener('click', () => leafletMap.zoomOut());
+
+  // Chart tab switching
+  document.querySelectorAll('.chart-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.chart-tab').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      // Render on first reveal so SVG has correct dimensions
+      if (btn.dataset.tab === 'trend' && state.selectedNeighborhood)
+        renderTrendChart(state.selectedNeighborhood);
+    });
+  });
+
+  document.getElementById('zoom-reset').addEventListener('click', () => {
+    state.selectedNeighborhood = null;
+    document.querySelectorAll('.nbhd-item').forEach(el => el.classList.remove('active'));
+    document.getElementById('charts-panel').classList.remove('open');
+    leafletMap.flyTo([47.608, -122.335], 12, { duration: 0.6 });
+    applyFilters();
+  });
+
+  document.getElementById('charts-close').addEventListener('click', () => {
+    document.getElementById('charts-panel').classList.remove('open');
+    state.selectedNeighborhood = null;
+    document.querySelectorAll('.nbhd-item').forEach(el => el.classList.remove('active'));
+    applyFilters();
+  });
+}
+
+</script>
+</body>
+</html>
