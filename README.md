@@ -119,6 +119,10 @@ No npm, no bundler — everything loads from CDN and local files.
 
 ---
 
+## Live demo Link
+http://css1.seattleu.edu/~tharris1/final/seattle_crime.html​
+
+
 ## Data Source
 
-Seattle Police Department — Crime Data export via the [Seattle Open Data Portal](https://data.seattle.gov/). Data covers incident reports from January 2008 through early 2026.
+Seattle Police Department — Crime Data export via the [Seattle Open Data Portal](https://data.seattle.gov/Public-Safety/SPD-Crime-Data-2008-Present/tazs-3rd5/about_data). Data covers incident reports from January 2008 through early 2026.
